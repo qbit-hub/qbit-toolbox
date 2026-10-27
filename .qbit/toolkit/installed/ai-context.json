@@ -1,13 +1,13 @@
 {
     "schemaVersion":  "1.0",
     "installerId":  "installer.ai-context",
-    "installerVersion":  "1.2.5",
+    "installerVersion":  "1.2.9",
     "mode":  "member",
     "projectId":  "qbit",
     "repositoryId":  "qbit-toolbox",
     "contextRemote":  "https://github.com/qbit-hub/qbit-ai-context.git",
     "contextBranch":  "main",
-    "installedAtUtc":  "2026-08-31T17:45:25Z",
+    "installedAtUtc":  "2026-10-27T15:30:17Z",
     "managedFiles":  [
                          {
                              "path":  ".ai/context/.gitignore",
@@ -18,12 +18,16 @@
                              "sha256":  "1a51e5b9705957c015dc21ff2d3ad8ef4cf327bda39b179e9729cb714846d060"
                          },
                          {
+                             "path":  ".ai/context/context-sync-gate.ps1",
+                             "sha256":  "0da0d32ee61dd9f1a21e6c5a300643d2ce4afb20309cd2fc7c4791e55377c6d6"
+                         },
+                         {
                              "path":  ".ai/context/context-transfer.ps1",
-                             "sha256":  "87c63ba07ec341e357dc142bd5d1aaf87ae98f038b371e2cd1abaa669c411532"
+                             "sha256":  "36c4a1646ba5d2547af825bab7fea9076a20ad921b51cc648a3f743058c178f3"
                          },
                          {
                              "path":  ".ai/context/context.ps1",
-                             "sha256":  "03fff5c9aedebe80a49ffeb4d71b27b64f0e1805ae73c0672fd02f6dd2c2c732"
+                             "sha256":  "567a3b106ba8a5b4c0dc210fbee3fd916b1af032f6202db749c6de9b3f8907fd"
                          },
                          {
                              "path":  ".ai/context/context.py",
@@ -51,7 +55,7 @@
                               "path":  "AGENTS.md",
                               "begin":  "\u003c!-- qbit-toolkit:ai-context:start --\u003e",
                               "end":  "\u003c!-- qbit-toolkit:ai-context:end --\u003e",
-                              "sha256":  "1c221de7fe11da0e599fd81aafa79c7556a3778b5143b6140cfc4576a5cda5a6"
+                              "sha256":  "ec34e0fe1f5dd4fc9bbf902bcb8d4b523ba9540288a8adc9016bbac23997bf37"
                           },
                           {
                               "path":  "AI_CONTEXT.md",
@@ -61,7 +65,7 @@
                           }
                       ],
     "seededFiles":  [
-
+                        ".ai-bridge/README.md"
                     ],
     "stateFile":  ".qbit/toolkit/installed/ai-context.json"
 }
