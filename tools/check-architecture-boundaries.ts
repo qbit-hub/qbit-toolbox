@@ -3,6 +3,19 @@ import { join, relative, sep } from "node:path";
 
 const root = process.cwd();
 const errors: string[] = [];
+const controlPermissions = [
+  "allow-get-core-status",
+  "allow-hotkeys-list-mappings",
+  "allow-hotkeys-create-mapping",
+  "allow-hotkeys-update-mapping",
+  "allow-hotkeys-delete-mapping",
+  "allow-hotkeys-set-mapping-enabled",
+  "allow-hotkeys-set-feature-enabled",
+  "allow-hotkeys-get-runtime-status",
+  "allow-hotkeys-analyze-candidate",
+  "allow-get-autostart",
+  "allow-set-autostart",
+];
 const ignoredDirectories = new Set([
   ".ai-bridge",
   ".git",
@@ -196,12 +209,14 @@ function checkCapability(file: string): void {
     }
     if (
       permissionValues === undefined ||
-      permissionValues.length !== 1 ||
-      permissionValues[0] !== "allow-get-core-status"
+      permissionValues.length !== controlPermissions.length ||
+      controlPermissions.some(
+        (permission) => !permissionValues.includes(permission),
+      )
     ) {
       report(
         file,
-        'control-window must define permissions exactly ["allow-get-core-status"]',
+        "control-window must define exactly the reviewed explicit control command permissions",
       );
     }
   }
@@ -234,6 +249,8 @@ function cargoUsesRusqlite(file: string): void {
 
 function checkSource(file: string): void {
   const path = repoPath(file);
+  const nativeLayer =
+    /^features\/[^/]+\/native\/src\/(domain|application|runtime)\//.test(path);
   if (!sourceExtensions.has(path.slice(path.lastIndexOf(".")).toLowerCase()))
     return;
   if (
@@ -244,6 +261,20 @@ function checkSource(file: string): void {
     return;
   const text = readText(file);
   if (text === undefined) return;
+  if (nativeLayer && /\b(?:windows|tauri)::/.test(text))
+    report(
+      file,
+      "OS and Tauri APIs must stay outside feature domain/application/runtime",
+    );
+  if (
+    /^features\/[^/]+\/native\/src\//.test(path) &&
+    /\bunsafe\s*(?:\{|extern|fn)/.test(text) &&
+    !/\/platform\/windows\/ffi\.rs$/.test(path)
+  )
+    report(
+      file,
+      "unsafe code is confined to the reviewed Windows FFI boundary",
+    );
   if (
     hasToken(text, "md3-next") &&
     !isWithin(path, "packages/ui") &&
@@ -259,6 +290,7 @@ function checkSource(file: string): void {
   }
   const requiresIpcAdapter =
     isWithin(path, "apps") ||
+    /^features\/[^/]+\/ui\//.test(path) ||
     isWithin(path, "packages/ui") ||
     isWithin(path, "packages/i18n");
   if (requiresIpcAdapter && /\binvoke\s*(?:<[^>]*>)?\s*\(/.test(text)) {

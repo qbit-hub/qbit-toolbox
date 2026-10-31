@@ -6,7 +6,7 @@ export type StartupPolicyDto = "manual" | "onApplicationStart";
 
 export type FeatureLifecycleStateDto = "unavailable" | "disabled" | "starting" | "running" | "degraded" | "stopping" | "failed";
 
-export type FeatureSummaryDto = { id: string, displayNameKey: string, descriptionKey: string, runtimeMode: RuntimeModeDto, startupPolicy: StartupPolicyDto, lifecycleState: FeatureLifecycleStateDto, };
+export type FeatureSummaryDto = { id: string, displayNameKey: string, descriptionKey: string, runtimeMode: RuntimeModeDto, startupPolicy: StartupPolicyDto, lifecycleState: FeatureLifecycleStateDto, route: string | null, };
 
 export type CoreRuntimeStateDto = "running" | "recoveryRequired";
 
@@ -19,3 +19,31 @@ export type CommandErrorDto = { code: string, category: CommandErrorCategoryDto,
  * Callers must supply a bounded, non-sensitive set of string values.
  */
 context: { [key in string]?: string }, };
+
+export type HotkeyModifier = "ctrl" | "shift" | "alt" | "meta" | "leftCtrl" | "rightCtrl" | "leftShift" | "rightShift" | "leftAlt" | "rightAlt" | "leftMeta" | "rightMeta";
+
+export type KeyIdentityKind = "logical" | "physical";
+
+export type KeyIdentity = { kind: KeyIdentityKind, token: string, };
+
+export type HotkeyChord = { modifiers: Array<HotkeyModifier>, primary: KeyIdentity, };
+
+export type HotkeyAction = { "kind": "emitShortcut", chord: HotkeyChord, } | { "kind": "disable" };
+
+export type HotkeyMappingInput = { enabled: boolean, trigger: HotkeyChord, action: HotkeyAction, label: string | null, };
+
+export type HotkeyMapping = { id: string, input: HotkeyMappingInput, };
+
+export type HotkeyConflictCode = "duplicateTrigger" | "selfMap" | "cycle" | "aliasCollision" | "secureAttentionSequence" | "unsupportedKey" | "invalidMapping";
+
+export type HotkeyConflictSeverity = "error" | "warning" | "info";
+
+export type HotkeyConflict = { code: HotkeyConflictCode, severity: HotkeyConflictSeverity, messageKey: string, };
+
+export type HotkeysConflictReport = { conflicts: Array<HotkeyConflict>, };
+
+export type HotkeysMetrics = { hookActive: boolean, mappingCount: number, eventsSeen: number, eventsMatched: number, actionsEmitted: number, injectionFailures: number, queueOverflows: number, configReloadFailures: number, };
+
+export type HotkeysRuntimeStatus = { desiredEnabled: boolean, lifecycleState: FeatureLifecycleStateDto, metrics: HotkeysMetrics, lastEngineError: CommandErrorDto | null, };
+
+export type AutostartStatus = { desiredEnabled: boolean, registered: boolean, };

@@ -3,5 +3,17 @@
   "identifier": "control-window",
   "description": "Least-privilege capability for the runtime-created control window",
   "windows": ["control"],
-  "permissions": ["allow-get-core-status"]
+  "permissions": [
+    "allow-get-core-status",
+    "allow-hotkeys-list-mappings",
+    "allow-hotkeys-create-mapping",
+    "allow-hotkeys-update-mapping",
+    "allow-hotkeys-delete-mapping",
+    "allow-hotkeys-set-mapping-enabled",
+    "allow-hotkeys-set-feature-enabled",
+    "allow-hotkeys-get-runtime-status",
+    "allow-hotkeys-analyze-candidate",
+    "allow-get-autostart",
+    "allow-set-autostart"
+  ]
 }

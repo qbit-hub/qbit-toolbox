@@ -24,6 +24,7 @@ pub struct FeatureSummary {
     pub runtime_mode: RuntimeMode,
     pub startup_policy: StartupPolicy,
     pub lifecycle_state: FeatureLifecycleState,
+    pub route: Option<&'static str>,
 }
 
 impl FeatureSummary {
@@ -35,6 +36,7 @@ impl FeatureSummary {
             runtime_mode: entry.descriptor.runtime_mode,
             startup_policy: entry.descriptor.startup_policy,
             lifecycle_state: entry.state,
+            route: entry.descriptor.ui.map(|ui| ui.route),
         }
     }
 }
@@ -282,6 +284,7 @@ mod tests {
         assert_eq!(
             registry.summary(&id),
             Some(FeatureSummary {
+                route: Some("/features/example"),
                 id,
                 display_name_key: "features.example.display-name",
                 description_key: "features.example.description",

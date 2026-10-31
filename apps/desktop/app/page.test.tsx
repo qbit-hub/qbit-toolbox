@@ -75,6 +75,7 @@ describe("HomePage", () => {
           runtimeMode: "embeddedBackground",
           startupPolicy: "onApplicationStart",
           lifecycleState: "running",
+          route: null,
         },
       ],
     } satisfies CoreStatusDto);

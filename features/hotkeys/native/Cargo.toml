@@ -10,10 +10,40 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+arc-swap.workspace = true
+crossbeam-queue.workspace = true
+ipc-contracts = { path = "../../../crates/ipc-contracts" }
+
+[features]
+isolated-output-acceptance = ["dep:sha2"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
+sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.61.3", features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Com",
+    "Win32_System_IO",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_StationsAndDesktops",
+    "Win32_UI_Shell",
+] }
+
+[[test]]
+name = "acceptance_isolated_output"
+path = "tests/acceptance_isolated_output.rs"
+required-features = ["isolated-output-acceptance"]
 
 [lib]
 path = "src/lib.rs"
