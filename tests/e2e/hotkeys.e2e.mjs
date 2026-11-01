@@ -168,11 +168,11 @@ describe("Windows Hotkeys through real UI / IPC / SQLite", () => {
     await runtime("Disabled");
     const beforeEdit = await persisted(0, 1);
     await addDisableMapping();
-    await expect($("[role='dialog'] button=Save")).toBeDisabled();
+    await expect($("[role='dialog']").$("button=Save")).toBeDisabled();
     await expect($("[role='dialog'] [role='alert']")).toHaveText(
       "An enabled mapping already uses this trigger.",
     );
-    await $("[role='dialog'] button=Cancel").click();
+    await $("[role='dialog']").$("button=Cancel").click();
     assert.deepEqual(
       (await persisted(0, 1)).mappings,
       beforeEdit.mappings,
@@ -187,7 +187,7 @@ describe("Windows Hotkeys through real UI / IPC / SQLite", () => {
     await expect($("[role='dialog'] [role='alert']")).toHaveText(
       "No blocking conflicts. Ready to save.",
     );
-    await $("[role='dialog'] button=Save").click();
+    await $("[role='dialog']").$("button=Save").click();
     await browser.refresh();
     await runtime("Disabled");
     await expect($("ul[aria-label='Global mappings']")).toHaveText(
@@ -239,7 +239,7 @@ describe("Windows Hotkeys through real UI / IPC / SQLite", () => {
   });
   it(scenarios[1], async () => {
     await addDisableMapping();
-    await $("[role='dialog'] button=Save").click();
+    await $("[role='dialog']").$("button=Save").click();
     const saved = await persisted(0, 1);
     // Two distinct graceful exits and launches; reloadSession is only the
     // transport for a new host after OS exit and DB handle release are proven.
