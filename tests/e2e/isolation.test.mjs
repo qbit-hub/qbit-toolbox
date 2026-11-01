@@ -12,12 +12,76 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { Script } from "node:vm";
 import {
   createEvidenceReporter,
   scenarios,
   classifyFailure,
 } from "./evidence.mjs";
 import { runOwnedDesktop } from "./runner-control.mjs";
+function patchedDriverDiscovery(kind, execute, exists = () => true) {
+  const source = readFileSync(
+    `node_modules/@wdio/tauri-service/dist/${kind}/index.js`,
+    "utf8",
+  );
+  const start = source.indexOf("async function findMsEdgeDriver(");
+  const end = source.indexOf("\n/**", start);
+  assert(start >= 0 && end > start, "pinned discovery implementation exists");
+  // Exercise the installed patched function with fake I/O only. Never import
+  // service side effects or execute a real driver/hook on this workstation.
+  return new Script(`(${source.slice(start, end)})`).runInNewContext({
+    process: { platform: "win32" },
+    existsSync: exists,
+    node_fs: { existsSync: exists },
+    execAsync: () => {
+      throw new Error("Global PATH lookup is forbidden for an explicit driver");
+    },
+    execFileAsync: execute,
+    log$7: { debug() {} },
+  });
+}
+test("patched Tauri service validates the explicit private driver in ESM and CJS without PATH fallback", async () => {
+  for (const kind of ["esm", "cjs"]) {
+    for (const prefix of ["MSEdgeDriver", "Microsoft Edge WebDriver"]) {
+      const calls = [];
+      const find = patchedDriverDiscovery(kind, async (...args) => {
+        calls.push(args);
+        return { stdout: `${prefix} 131.0.2903.86 (fixture)\r\n` };
+      });
+      const result = await find("C:\\owned fixture\\msedgedriver.exe");
+      assert.equal(result.path, "C:\\owned fixture\\msedgedriver.exe");
+      assert.equal(result.version, "131.0.2903.86");
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0][0], result.path);
+      assert.equal(JSON.stringify(calls[0][1]), '["--version"]');
+      assert.equal(calls[0][2].timeout, 5000);
+    }
+  }
+});
+test("patched Tauri discovery rejects unknown output, missing private binary and failed probes", async () => {
+  for (const kind of ["esm", "cjs"]) {
+    const missing = patchedDriverDiscovery(
+      kind,
+      () => assert.fail("Missing binary must never execute"),
+      () => false,
+    );
+    assert.equal((await missing("missing/driver.exe")).version, undefined);
+    for (const output of [
+      "ChromeDriver 131.0.2903.86",
+      "Microsoft Edge WebDriver 131.0.2903",
+      "MSEdgeDriver 131.0.2903.86\nMSEdgeDriver 156.0.4314.42",
+    ]) {
+      const find = patchedDriverDiscovery(kind, async () => ({
+        stdout: output,
+      }));
+      assert.equal((await find("owned/driver.exe")).version, undefined);
+    }
+    const failed = patchedDriverDiscovery(kind, async () => {
+      throw new Error("fixture probe failed");
+    });
+    assert.equal((await failed("owned/driver.exe")).version, undefined);
+  }
+});
 test("Windows driver provisioning validators fail closed without native execution", () => {
   const results = JSON.parse(
     execFileSync(

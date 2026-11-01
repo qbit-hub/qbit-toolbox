@@ -1,0 +1,106 @@
+diff --git a/dist/cjs/index.js b/dist/cjs/index.js
+index 315a01dc38739e157ee4f79c5a3e88e0c9af128b..0b4c4297bd07e6aca931dbed8f25d861f8aff88a 100644
+--- a/dist/cjs/index.js
++++ b/dist/cjs/index.js
+@@ -1651,24 +1651,24 @@ function getMajorVersion(version) {
+ /**
+  * Check if msedgedriver.exe exists in PATH and get its version
+  */
+-async function findMsEdgeDriver() {
++async function findMsEdgeDriver(nativeDriverPath) {
+     if (process.platform !== 'win32') {
+         return {};
+     }
+     try {
+-        // Try to find in PATH
+-        const { stdout: pathResult } = await execAsync('where msedgedriver.exe 2>nul', {
++        // An explicit private driver must be checked instead of a global PATH entry.
++        const pathResult = nativeDriverPath ?? (await execAsync('where msedgedriver.exe 2>nul', {
+             encoding: 'utf8',
+-        });
+-        const driverPath = pathResult.trim().split('\n')[0];
++        })).stdout;
++        const driverPath = pathResult.trim().split('\n')[0].trim();
+         if (driverPath && node_fs.existsSync(driverPath)) {
+             // Get version
+             try {
+-                const { stdout: versionOutput } = await execAsync(`"${driverPath}" --version`, {
++                const { stdout: versionOutput } = await execFileAsync(driverPath, ['--version'], {
+                     encoding: 'utf8',
+                     timeout: 5000,
+                 });
+-                const match = versionOutput.match(/MSEdgeDriver ([\d.]+)/);
++                const match = versionOutput.trim().match(/^(?:MSEdgeDriver|Microsoft Edge WebDriver) (\d+\.\d+\.\d+\.\d+)(?:\s+\([^\r\n]*\))?$/i);
+                 if (match) {
+                     log$7.debug(`Found msedgedriver ${match[1]} at ${driverPath}`);
+                     return { path: driverPath, version: match[1] };
+@@ -1832,7 +1832,7 @@ async function ensureMsEdgeDriver(_tauriBinaryPath, autoDownload = true, options
+     const { version: edgeVersion, source } = resolved;
+     log$7.info(`Target Edge/WebView2 version ${edgeVersion} (source: ${source})`);
+     const edgeMajor = getMajorVersion(edgeVersion);
+-    const existing = await findMsEdgeDriver();
++    const existing = await findMsEdgeDriver(options.nativeDriverPath);
+     if (existing.path && existing.version) {
+         // An explicit pin (`source: 'override'`) must match the driver exactly; the runtime-derived
+         // paths only need the shared major, since Edge and its driver drift in the lower version parts.
+@@ -2084,6 +2084,7 @@ class TauriLaunchService {
+             // machine-global, so per-capability overrides don't apply to this single shared check.
+             const edgeDriverResult = await ensureMsEdgeDriver(firstResolvedBinaryPath, autoDownloadEdgeDriver, {
+                 edgeDriverVersion: this.options.edgeDriverVersion,
++                nativeDriverPath: this.options.nativeDriverPath,
+                 env: this.options.env,
+             });
+             if (nativeUtils.isErr(edgeDriverResult)) {
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 153082ae1ffab604c07955031a271189ecf87c55..28fbaf4d82df36e47b55fb1cf2f0e477c96fcc70 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -1647,24 +1647,24 @@ function getMajorVersion(version) {
+ /**
+  * Check if msedgedriver.exe exists in PATH and get its version
+  */
+-async function findMsEdgeDriver() {
++async function findMsEdgeDriver(nativeDriverPath) {
+     if (process.platform !== 'win32') {
+         return {};
+     }
+     try {
+-        // Try to find in PATH
+-        const { stdout: pathResult } = await execAsync('where msedgedriver.exe 2>nul', {
++        // An explicit private driver must be checked instead of a global PATH entry.
++        const pathResult = nativeDriverPath ?? (await execAsync('where msedgedriver.exe 2>nul', {
+             encoding: 'utf8',
+-        });
+-        const driverPath = pathResult.trim().split('\n')[0];
++        })).stdout;
++        const driverPath = pathResult.trim().split('\n')[0].trim();
+         if (driverPath && existsSync(driverPath)) {
+             // Get version
+             try {
+-                const { stdout: versionOutput } = await execAsync(`"${driverPath}" --version`, {
++                const { stdout: versionOutput } = await execFileAsync(driverPath, ['--version'], {
+                     encoding: 'utf8',
+                     timeout: 5000,
+                 });
+-                const match = versionOutput.match(/MSEdgeDriver ([\d.]+)/);
++                const match = versionOutput.trim().match(/^(?:MSEdgeDriver|Microsoft Edge WebDriver) (\d+\.\d+\.\d+\.\d+)(?:\s+\([^\r\n]*\))?$/i);
+                 if (match) {
+                     log$7.debug(`Found msedgedriver ${match[1]} at ${driverPath}`);
+                     return { path: driverPath, version: match[1] };
+@@ -1828,7 +1828,7 @@ async function ensureMsEdgeDriver(_tauriBinaryPath, autoDownload = true, options
+     const { version: edgeVersion, source } = resolved;
+     log$7.info(`Target Edge/WebView2 version ${edgeVersion} (source: ${source})`);
+     const edgeMajor = getMajorVersion(edgeVersion);
+-    const existing = await findMsEdgeDriver();
++    const existing = await findMsEdgeDriver(options.nativeDriverPath);
+     if (existing.path && existing.version) {
+         // An explicit pin (`source: 'override'`) must match the driver exactly; the runtime-derived
+         // paths only need the shared major, since Edge and its driver drift in the lower version parts.
+@@ -2080,6 +2080,7 @@ class TauriLaunchService {
+             // machine-global, so per-capability overrides don't apply to this single shared check.
+             const edgeDriverResult = await ensureMsEdgeDriver(firstResolvedBinaryPath, autoDownloadEdgeDriver, {
+                 edgeDriverVersion: this.options.edgeDriverVersion,
++                nativeDriverPath: this.options.nativeDriverPath,
+                 env: this.options.env,
+             });
+             if (isErr(edgeDriverResult)) {

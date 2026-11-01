@@ -47,5 +47,8 @@
     "prettier": "^3.6.2",
     "typescript": "^6.0.2",
     "webdriverio": "9.31.9"
+  },
+  "patchedDependencies": {
+    "@wdio/tauri-service@1.5.1": "patches/@wdio%2Ftauri-service@1.5.1.patch"
   }
 }
