@@ -7,6 +7,7 @@ import { Key } from "webdriverio";
 import {
   ownedProcess,
   powershell,
+  powerShellEnvironment,
   waitForExit,
   exclusiveDatabases,
   waitFor,
@@ -324,7 +325,7 @@ describe("Windows Hotkeys through real UI / IPC / SQLite", () => {
         ],
         {
           windowsHide: true,
-          env: { ...process.env, QBIT_E2E_PID: String(app.pid) },
+          env: powerShellEnvironment({ QBIT_E2E_PID: String(app.pid) }),
         },
       );
       const closed = await awaitWindow(false);
@@ -341,7 +342,9 @@ describe("Windows Hotkeys through real UI / IPC / SQLite", () => {
         ],
         {
           windowsHide: true,
-          env: { ...process.env, QBIT_E2E_OLD_WINDOW: String(before.window) },
+          env: powerShellEnvironment({
+            QBIT_E2E_OLD_WINDOW: String(before.window),
+          }),
         },
       );
       assert.equal(

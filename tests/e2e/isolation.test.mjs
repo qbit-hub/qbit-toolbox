@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { authorizeDesktop, validateRoot } from "./isolation.mjs";
+import {
+  authorizeDesktop,
+  validateRoot,
+  powerShellEnvironment,
+  powershell,
+} from "./isolation.mjs";
 import { tmpdir } from "node:os";
 import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,11 +29,51 @@ test("Windows driver provisioning validators fail closed without native executio
         "-File",
         "tests/e2e/desktop-environment.tests.ps1",
       ],
-      { encoding: "utf8", windowsHide: true, timeout: 20000 },
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 20000,
+        env: powerShellEnvironment(),
+      },
     ),
   );
   assert.equal(results.length, 29);
   assert(results.every((result) => result.status === "PASS"));
+});
+test("PowerShell child environment removes incompatible module paths and preserves isolation selectors", () => {
+  const source = {
+    PSModulePath: "PowerShell7/modules",
+    pSmOdUlEpAtH: "another/incompatible/path",
+    PATH: "existing/tool/path",
+    QBIT_E2E_ISOLATED_DESKTOP: "1",
+    QBIT_E2E_NATIVE_DRIVER: "owned/driver.exe",
+    QBIT_E2E_DATA_ROOT: "owned/fixture",
+  };
+  const before = { ...source };
+  assert.deepEqual(
+    powerShellEnvironment(
+      { PSMODULEPATH: "override", QBIT_E2E_PID: "42" },
+      source,
+    ),
+    {
+      PATH: source.PATH,
+      QBIT_E2E_ISOLATED_DESKTOP: "1",
+      QBIT_E2E_NATIVE_DRIVER: source.QBIT_E2E_NATIVE_DRIVER,
+      QBIT_E2E_DATA_ROOT: source.QBIT_E2E_DATA_ROOT,
+      QBIT_E2E_PID: "42",
+    },
+  );
+  assert.deepEqual(source, before, "parent environment is unchanged");
+});
+test("Windows PowerShell security module loads through Node despite inherited incompatible paths", async () => {
+  // Module discovery/import only: no driver, signature bypass, GUI or OS input.
+  assert.equal(
+    await powershell(
+      "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; (Get-Command Get-AuthenticodeSignature -ErrorAction Stop).ModuleName",
+      { PSModulePath: "Z:\\qbit-e2e-nonexistent-module-fixture" },
+    ),
+    "Microsoft.PowerShell.Security",
+  );
 });
 test("desktop automation fails closed on a normal workstation or self-hosted runner", () => {
   for (const env of [

@@ -48,6 +48,19 @@ export function validateBinary(binary) {
   return expected;
 }
 
+export function powerShellEnvironment(
+  overrides = {},
+  environment = process.env,
+) {
+  // pwsh -> Node -> powershell.exe retains PS7 module paths. Windows PowerShell
+  // must construct its own paths to load its signature/security cmdlets.
+  return Object.fromEntries(
+    Object.entries({ ...environment, ...overrides }).filter(
+      ([key]) => key.toUpperCase() !== "PSMODULEPATH",
+    ),
+  );
+}
+
 export async function powershell(script, env = {}) {
   const { stdout } = await promisify(execFile)(
     "powershell",
@@ -55,7 +68,7 @@ export async function powershell(script, env = {}) {
     {
       windowsHide: true,
       timeout: 45000,
-      env: { ...process.env, ...env },
+      env: powerShellEnvironment(env),
     },
   );
   return stdout.trim();

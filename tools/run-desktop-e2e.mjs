@@ -7,6 +7,7 @@ import {
   authorizeDesktop,
   assertNoQbit,
   powershell,
+  powerShellEnvironment,
   validateBinary,
   validateRoot,
 } from "../tests/e2e/isolation.mjs";
@@ -103,7 +104,7 @@ try {
         "-ReportDirectory",
         reportDir,
       ],
-      { windowsHide: true, timeout: 45000, env: process.env },
+      { windowsHide: true, timeout: 45000, env: powerShellEnvironment() },
     );
     environment = JSON.parse(stdout);
   } catch (error) {
