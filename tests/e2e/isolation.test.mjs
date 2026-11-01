@@ -13,6 +13,23 @@ import {
   classifyFailure,
 } from "./evidence.mjs";
 import { runOwnedDesktop } from "./runner-control.mjs";
+test("Windows driver provisioning validators fail closed without native execution", () => {
+  const results = JSON.parse(
+    execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "tests/e2e/desktop-environment.tests.ps1",
+      ],
+      { encoding: "utf8", windowsHide: true, timeout: 20000 },
+    ),
+  );
+  assert.equal(results.length, 29);
+  assert(results.every((result) => result.status === "PASS"));
+});
 test("desktop automation fails closed on a normal workstation or self-hosted runner", () => {
   for (const env of [
     {},

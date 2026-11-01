@@ -84,7 +84,11 @@ jobs:
       - name: Check out the same workflow source candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Diagnose installed Windows image, WebView2 and EdgeDriver
+      - name: Provision source-pinned Microsoft EdgeDriver in CI-owned storage
+        shell: pwsh
+        run: ./tools/provision-desktop-e2e-driver.ps1 -ReportDirectory .ai-bridge/desktop-lifecycle/setup
+
+      - name: Diagnose Windows image, WebView2 and verified private EdgeDriver
         id: environment
         shell: pwsh
         run: ./tools/desktop-e2e-environment.ps1 -ReportDirectory .ai-bridge/desktop-lifecycle/setup -Configure

@@ -1,12 +1,13 @@
 param([Parameter(Mandatory=$true)][string]$ReportDirectory, [switch]$Configure)
 $ErrorActionPreference = 'Stop'
-$report = [IO.Path]::GetFullPath($ReportDirectory)
-$allowed = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.ai-bridge/desktop-lifecycle'))
-if (-not $report.StartsWith($allowed + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'BLOCKED_ISOLATION: diagnostic report path is outside the owned artifact root' }
+Import-Module (Join-Path $PSScriptRoot 'desktop-e2e-driver.psm1') -Force -DisableNameChecking
+$report = Assert-ConfinedPath $ReportDirectory (Join-Path $PSScriptRoot '../.ai-bridge/desktop-lifecycle')
 New-Item -ItemType Directory -Path $report -Force | Out-Null
 $evidence = [ordered]@{ schemaVersion=1; status='BLOCKED'; imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; selectedImage=$env:QBIT_E2E_IMAGE; runnerEnvironment=$env:RUNNER_ENVIRONMENT; sourceHead=$null; os=$null; runtime=$null; edgeDriver=$null }
 try {
-    if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:QBIT_E2E_ISOLATED_DESKTOP -ne '1') { throw 'BLOCKED_E2E_ENVIRONMENT: diagnostics require selected hosted Windows CI' }
+    Assert-DesktopCiAuthorization @{GITHUB_ACTIONS=$env:GITHUB_ACTIONS;RUNNER_ENVIRONMENT=$env:RUNNER_ENVIRONMENT;QBIT_E2E_ISOLATED_DESKTOP=$env:QBIT_E2E_ISOLATED_DESKTOP}
+    $spec = Get-Content (Join-Path $PSScriptRoot 'desktop-e2e-driver.json') -Raw | ConvertFrom-Json
+    Assert-DriverSpec $spec
     $evidence.sourceHead = (git rev-parse HEAD)
     if ($LASTEXITCODE -ne 0) { throw 'BLOCKED_CI_SETUP: cannot identify candidate HEAD' }
     $os = Get-CimInstance Win32_OperatingSystem
@@ -19,22 +20,21 @@ try {
     $evidence.registeredRuntimeVersion = $version
     $runtime = @(${env:ProgramFiles(x86)}, $env:ProgramFiles) | ForEach-Object { Join-Path $_ "Microsoft/EdgeWebView/Application/$version/msedgewebview2.exe" } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
     if (-not $runtime) { throw 'BLOCKED_CI_SETUP: registered WebView2 binary is unavailable' }
-    $driver = (Get-Command msedgedriver.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $expectedDriver = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.ai-bridge/e2e-tools/edgedriver/$($spec.version)/msedgedriver.exe"))
+    if (-not $env:QBIT_E2E_NATIVE_DRIVER -or [IO.Path]::GetFullPath($env:QBIT_E2E_NATIVE_DRIVER) -ine $expectedDriver) { throw 'BLOCKED_CI_SETUP: explicit private driver is missing or outside its pinned location' }
+    $driver = Assert-ConfinedPath $env:QBIT_E2E_NATIVE_DRIVER (Join-Path $PSScriptRoot '../.ai-bridge/e2e-tools')
     foreach ($entry in @(@{name='runtime';path=$runtime},@{name='edgeDriver';path=$driver})) {
-        $item = Get-Item -LiteralPath $entry.path
-        $signature = Get-AuthenticodeSignature -LiteralPath $entry.path
-        $record = @{ path=$item.FullName; version=$item.VersionInfo.ProductVersion; sha256=(Get-FileHash -LiteralPath $entry.path -Algorithm SHA256).Hash.ToLowerInvariant(); signature=[string]$signature.Status; signer=$signature.SignerCertificate.Subject }
+        $record = Get-MicrosoftBinaryRecord $entry.path
         $evidence[$entry.name] = $record
-        if ($signature.Status -ne 'Valid' -or $record.signer -notmatch 'O=Microsoft Corporation') { throw 'BLOCKED_CI_SETUP: runtime/driver is not verified Microsoft-signed software' }
     }
-    $driverText = (& $driver --version)
-    $driverMatch = [regex]::Match([string]$driverText, 'MSEdgeDriver (\d+\.\d+\.\d+\.\d+)')
-    if ($LASTEXITCODE -ne 0 -or -not $driverMatch.Success) { throw 'BLOCKED_CI_SETUP: driver version probe failed' }
-    $driverVersion = $driverMatch.Groups[1].Value
-    $evidence.edgeDriver.version = $driverVersion
     if ([regex]::Match([string]$evidence.runtime.version, '^\d+\.\d+\.\d+\.\d+').Value -ne $version) { throw 'BLOCKED_CI_SETUP: registered and executable WebView2 versions disagree' }
-    if (($driverVersion.Split('.')[0..2] -join '.') -ne ($version.Split('.')[0..2] -join '.')) { throw 'BLOCKED_CI_SETUP: installed WebView2/EdgeDriver build mismatch; no automatic download or replacement is permitted' }
     $evidence.runtime.version = $version
+    # Verify publisher + pinned file bytes + compatible build BEFORE execution.
+    Assert-DriverSelection $evidence.runtime $evidence.edgeDriver $spec $expectedDriver
+    $evidence.driverProbe = @{}
+    $probe = Invoke-EdgeDriverVersionProbe $driver $evidence.driverProbe
+    if ($probe.version -cne $evidence.edgeDriver.version) { throw 'BLOCKED_CI_SETUP: driver file and command versions disagree' }
+    $driverVersion = $probe.version
     $evidence.status = 'PASS'
     if ($Configure) {
         if (-not $env:GITHUB_ENV) { throw 'BLOCKED_CI_SETUP: no GitHub environment file' }
@@ -42,7 +42,7 @@ try {
     }
 } catch {
     $evidence.status = 'BLOCKED'
-    $evidence.error = $_.Exception.Message
+    $evidence.error = ConvertTo-DriverDiagnostic $_.Exception.Message
     throw
 } finally {
     $json = $evidence | ConvertTo-Json -Depth 6
