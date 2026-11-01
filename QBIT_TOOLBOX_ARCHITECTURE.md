@@ -427,7 +427,7 @@ A second process MUST delegate the appropriate activation intent to the first pr
 8. tear down tray/window resources;
 9. exit.
 
-Shutdown MUST have a bounded maximum duration. A feature that fails to stop must be diagnosable and must not hang application exit indefinitely.
+Each graceful-shutdown attempt MUST have a bounded maximum duration. Incomplete or unknown cleanup MUST be diagnosed and return a recoverable result rather than freeze the UI or silently authorize exit. The application retains resource ownership and offers deliberate Quit retry; it MUST NOT automatically force exit while cleanup is unacknowledged.
 
 ## 6.3 Activation intents
 
@@ -1583,6 +1583,29 @@ Third-party injected input policy must remain separately configurable/designable
 Shortcut-to-shortcut remapping requires explicit modifier transition planning. The engine must account for physically held modifiers when generating the target chord.
 
 This planner is domain/runtime logic and receives extensive deterministic unit/property coverage.
+
+## 20.9 Implemented core invariants
+
+- Semantic mappings compile into a Windows-native immutable keymap and publication is an atomic `ArcSwap` replacement. A failed native compile leaves the previously published map active.
+- Generic modifier requirements expand during configuration compilation to exact left, right, and both-side aliases. Overlapping generic and sided aliases in one identity space are blocking conflicts.
+- Physical trigger lookup wins when physical and logical mappings both match an event.
+- Action handoff is bounded and preallocated and fails open: if enqueueing fails, the original physical input is not suppressed.
+- Qbit-generated input and third-party injected input are distinct origins. The v1 policy bypasses both for remapping and modifier state; Qbit's extra-info tag identifies recursion only and is not a security boundary.
+- Output modifier planning uses physical modifier state at worker execution time, not a trigger-time snapshot.
+
+## 20.10 Windows lifecycle and configuration ownership
+
+- When enabled, Hotkeys owns exactly one hook/message-loop thread and one parked output worker. The preallocated action queue holds at most 64 requests. A disabled feature owns neither thread, hook, timer nor persistent feature database connection.
+- The callback uses thread-local, nonblocking reentrancy guards, validates raw codes, and passes injected events without modifying physical modifier state. Failed enqueue passes the source down/repeat/up until the next physical press. A consumed key-up remains consumed across map publication/removal.
+- Only the Windows `ffi` module may allow unsafe code. Hook installation/unhooking, OS message processing, callback-pointer copying, and SendInput carry explicit lifetime/ABI safety arguments. The callback contains a no-unwind boundary and fails open.
+- The output worker reads current atomic physical modifiers at execution, creates a complete fixed-capacity batch, and tags every generated event. A short send is an injection failure and is never blindly retried. UIPI failure cannot be inferred from GetLastError.
+- `hook_active` records acknowledged installation and known shutdown, not proof against Windows silently removing a timed-out low-level hook. There is no polling-based health claim; re-enable is an explicit recovery path.
+- Application configuration uses one shared bounded blocking persistence lane (32 queued jobs). Feature mutations serialize complete-state validation/native compilation, transactional persistence, then infallible atomic publication. Failed validation or persistence leaves the last published map intact; restart reloads committed database truth after a crash between commit and publication.
+- Core feature enablement defaults to disabled. The core owns desired state; Hotkeys owns actual runtime and feature data. Failed core enablement writes compensate by stopping a newly started runtime. Failed disablement writes retain desired state and expose failure after stopping safely. Core recovery rejects all feature operations.
+- Quit closes command admission permanently for that session, drains accepted configuration operations in FIFO order, requires explicit feature cleanup acknowledgement, releases connections, and only then permits application exit. A failed cleanup retains the lane/service/native owners for a deliberate tray `Retry Quit`; a timed-out wait retains the same in-flight attempt. Retries cannot overlap cleanup or reopen mutations. A failed stop signal is reported; a native stop timeout retains its pending acknowledgement and join handle. Failed unhook retains the hook/TLS/message thread, with callback cancellation already signaled, until an explicitly requested retry succeeds. No polling recovery or automatic forced exit is permitted.
+- The app-global Windows autostart preference defaults off, lives in core settings (forward migration 2), and uses the supported Tauri 2 autostart plugin. Persisted intent wins during startup reconciliation. OS changes are verified and compensated on persistence failure. Autostart is independent of Hotkeys enablement.
+- UI capture uses real focused KeyboardEvents and generic modifiers. Letters follow `event.key`; numpad/special keys use reliable location/code distinctions. Dead, composing, AltGraph, non-Latin and ambiguous punctuation input is rejected instead of guessing. Escape cancels capture; repeats and modifier-only events do not save a chord. Native analysis remains the save authority.
+- Windows desktop E2E uses a separately identified `desktop-e2e` build, a fail-closed temporary data root and the official external tauri-driver path. No test override or driver is present in production builds. Normal tests never install a real hook or emit OS shortcuts; the lifecycle probe is opt-in.
 
 ---
 

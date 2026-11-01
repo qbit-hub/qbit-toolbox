@@ -12,6 +12,8 @@ use std::time::Duration;
 use feature_api::{FeatureId, FeatureIdError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+pub mod lane;
+
 const DATABASE_DIRECTORY: &str = "data";
 const DATABASE_FILE: &str = "core.db";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -205,6 +207,21 @@ pub struct CoreStore {
 }
 
 impl CoreStore {
+    pub fn autostart_enabled(&self) -> Result<bool, PersistenceError> {
+        self.connection
+            .query_row(
+                "SELECT enabled FROM app_settings WHERE name = 'autostart'",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(false))
+            .map_err(|source| PersistenceError::Sqlite { source })
+    }
+    pub fn set_autostart_enabled(&self, enabled: bool) -> Result<(), PersistenceError> {
+        self.connection.execute("INSERT INTO app_settings(name, enabled) VALUES ('autostart', ?1) ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled", params![enabled])
+            .map(|_| ()).map_err(|source| PersistenceError::Sqlite { source })
+    }
     /// Opens the durable core database below the caller-provided application data root.
     pub fn open(
         app_data_root: impl AsRef<Path>,
@@ -308,11 +325,18 @@ impl Migration {
     }
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "create_feature_state",
-    apply: create_feature_state,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "create_feature_state",
+        apply: create_feature_state,
+    },
+    Migration::new(2, "create_app_settings", create_app_settings),
+];
+
+fn create_app_settings(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    transaction.execute_batch("CREATE TABLE app_settings(name TEXT PRIMARY KEY NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));")
+}
 
 fn create_feature_state(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
     transaction.execute_batch(
@@ -461,7 +485,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let store = CoreStore::open(directory.path(), DurabilityProfile::Critical).unwrap();
 
-        assert_eq!(store.schema_version().unwrap(), 1);
+        assert_eq!(store.schema_version().unwrap(), 2);
         assert!(store.database_path().ends_with("data/core.db"));
         let table: String = store
             .connection
@@ -480,14 +504,14 @@ mod tests {
         CoreStore::open(directory.path(), DurabilityProfile::Standard).unwrap();
         let reopened = CoreStore::open(directory.path(), DurabilityProfile::Standard).unwrap();
 
-        assert_eq!(reopened.schema_version().unwrap(), 1);
+        assert_eq!(reopened.schema_version().unwrap(), 2);
         let count: i64 = reopened
             .connection
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
     }
 
     #[test]

@@ -24,3 +24,12 @@ coverage/
 # Package-manager and generated lockfiles
 bun.lock
 Cargo.lock
+
+# Installer-owned AI tooling and transient central Context receipts are verified
+# against their canonical owner, not rewritten by product-code formatting.
+.ai/context/cache/
+.ai/policies/
+.qbit/toolkit/installed/
+AGENTS.md
+AI_CONTEXT.md
+docs/ai-tooling/versions.md

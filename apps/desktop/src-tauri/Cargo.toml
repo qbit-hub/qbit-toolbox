@@ -24,3 +24,12 @@ ipc-contracts = { path = "../../../crates/ipc-contracts" }
 persistence = { path = "../../../crates/persistence" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "=2.5.1"
+qbit-hotkeys = { path = "../../../features/hotkeys/native" }
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+desktop-e2e = []

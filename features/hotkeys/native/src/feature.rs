@@ -7,7 +7,7 @@ use feature_api::{
 pub const FEATURE_ID: &str = "qbit.hotkeys";
 pub const FEATURE_SCHEMA_VERSION: u32 = 1;
 
-/// Static metadata only; host registration is deliberately deferred.
+/// Static metadata; the host starts this feature only when persisted enabled.
 pub fn descriptor() -> FeatureDescriptor {
     FeatureDescriptor {
         id: FeatureId::new(FEATURE_ID).expect("static feature id is valid"),

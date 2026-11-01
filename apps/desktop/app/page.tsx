@@ -134,6 +134,9 @@ export default function HomePage() {
                         : translatedName;
                     return (
                       <Typography component="li" key={feature.id}>
+                        {feature.route ? (
+                          <Button href={feature.route}>{name}</Button>
+                        ) : null}
                         {t("core.feature.format", {
                           name,
                           id: feature.id,

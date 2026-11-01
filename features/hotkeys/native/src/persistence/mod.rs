@@ -13,6 +13,8 @@ use persistence::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Error as JsonError;
 use uuid::Uuid;
+#[cfg(all(test, windows))]
+mod service_tests;
 
 use crate::domain::Mapping;
 use crate::feature::{FEATURE_ID, FEATURE_SCHEMA_VERSION};

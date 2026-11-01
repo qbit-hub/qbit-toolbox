@@ -1,8 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use app_runtime::{ActivationIntent, FeatureRegistry, FeatureSummary};
@@ -24,6 +21,38 @@ const OPEN_MENU_ID: &str = "open";
 const QUIT_MENU_ID: &str = "quit";
 const DIAGNOSTICS_CAPACITY: usize = 256;
 
+fn configuration_root<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<std::path::PathBuf, CommandErrorDto> {
+    #[cfg(feature = "desktop-e2e")]
+    {
+        let _ = app;
+        let root = std::env::var_os("QBIT_E2E_DATA_ROOT")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(app_data_command_error)?;
+        let root = root.canonicalize().map_err(|_| app_data_command_error())?;
+        let temp = std::env::temp_dir()
+            .canonicalize()
+            .map_err(|_| app_data_command_error())?;
+        if !root.starts_with(&temp)
+            || !root
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("qbit-hotkeys-e2e-"))
+        {
+            return Err(app_data_command_error());
+        }
+        Ok(root)
+    }
+    #[cfg(not(feature = "desktop-e2e"))]
+    app.path()
+        .app_data_dir()
+        .map_err(|_| app_data_command_error())
+}
+mod autostart;
+mod hotkeys_commands;
+mod shutdown;
+use hotkeys_commands::*;
+
 struct ApplicationState {
     app_version: String,
     platform: String,
@@ -31,9 +60,9 @@ struct ApplicationState {
     schema_version: Option<u32>,
     startup_error: Option<CommandErrorDto>,
     registry: Mutex<FeatureRegistry>,
-    _core_store: Mutex<Option<CoreStore>>,
-    exit_requested: AtomicBool,
+    shutdown: shutdown::Shutdown,
 }
+struct ShutdownMenu(tauri::menu::MenuItem<tauri::Wry>);
 
 struct DiagnosticsState(Mutex<DiagnosticsRecorder>);
 
@@ -90,6 +119,7 @@ fn feature_summary_dto(summary: &FeatureSummary) -> FeatureSummaryDto {
             FeatureLifecycleState::Stopping => FeatureLifecycleStateDto::Stopping,
             FeatureLifecycleState::Failed => FeatureLifecycleStateDto::Failed,
         },
+        route: summary.route.map(str::to_owned),
     }
 }
 
@@ -186,11 +216,17 @@ fn recover(error: CommandErrorDto) -> CoreBootstrap {
 }
 
 fn open_core_store<R: tauri::Runtime>(app: &tauri::App<R>) -> CoreBootstrap {
-    let app_data_dir = match app.path().app_data_dir() {
+    let app_data_dir = match configuration_root(app.handle()) {
         Ok(directory) => directory,
         Err(_) => return recover(app_data_command_error()),
     };
 
+    std::thread::spawn(move || open_core_at_path(app_data_dir))
+        .join()
+        .unwrap_or_else(|_| recover(internal_command_error()))
+}
+
+fn open_core_at_path(app_data_dir: std::path::PathBuf) -> CoreBootstrap {
     let store = match CoreStore::open(app_data_dir, DurabilityProfile::Critical) {
         Ok(store) => store,
         Err(error) => return recover(persistence_command_error(&error)),
@@ -283,10 +319,51 @@ fn handle_activation(app: &AppHandle, intent: ActivationIntent) {
 }
 
 fn quit_application(app: &AppHandle) {
-    if let Some(state) = app.try_state::<ApplicationState>() {
-        state.exit_requested.store(true, Ordering::Relaxed);
+    let state = app.state::<ApplicationState>();
+    if !state.shutdown.begin() {
+        return;
     }
-    app.exit(0);
+    let lane = app.state::<ConfigurationState>().lane.clone();
+    // Close admission before launching the bounded blocking shutdown wait.
+    if lane.stop_accepting().is_err() {
+        shutdown_incomplete(app);
+        return;
+    }
+    if let Some(menu) = app.try_state::<ShutdownMenu>() {
+        let _ = menu.0.set_text("Quitting…");
+    }
+    let owner = app.clone();
+    if std::thread::Builder::new()
+        .name("graceful-shutdown".into())
+        .spawn(move || {
+            let cleaned = lane.close().is_ok();
+            if owner.state::<ApplicationState>().shutdown.finish(cleaned) {
+                owner.exit(0);
+            } else if !cleaned {
+                show_shutdown_retry(&owner);
+            }
+        })
+        .is_err()
+    {
+        shutdown_incomplete(app);
+    }
+}
+fn shutdown_incomplete(app: &AppHandle) {
+    app.state::<ApplicationState>().shutdown.finish(false);
+    show_shutdown_retry(app);
+}
+fn show_shutdown_retry(app: &AppHandle) {
+    record_diagnostic(
+        app,
+        DiagnosticLevel::Error,
+        "shutdown_incomplete",
+        Some("SHUTDOWN_INCOMPLETE"),
+    );
+    if app.state::<ApplicationState>().shutdown.phase() == shutdown::Phase::Incomplete
+        && let Some(menu) = app.try_state::<ShutdownMenu>()
+    {
+        let _ = menu.0.set_text("Retry Quit (cleanup incomplete)");
+    }
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -294,9 +371,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .manage(DiagnosticsState(Mutex::new(DiagnosticsRecorder::new(
             DIAGNOSTICS_CAPACITY,
         ))))
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _| {
+            #[cfg(feature = "desktop-e2e")]
+            if _args.iter().any(|arg| arg == "--e2e-quit") {
+                quit_application(app);
+                return;
+            }
             handle_activation(app, ActivationIntent::OpenControlWindow)
         }))
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
             let core = open_core_store(app);
             if let Some(error) = core.startup_error.as_ref() {
@@ -309,20 +392,76 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let recovery_required = core.runtime_state == CoreRuntimeStateDto::RecoveryRequired;
+            // Inert during core recovery: the lane rejects all feature operations.
+            let root = configuration_root(app.handle()).unwrap_or_default();
+            let service = qbit_hotkeys::service::HotkeysService::new(
+                root,
+                qbit_hotkeys::platform::backend::SystemBackend::default(),
+            );
+            let lane = std::sync::Arc::new(persistence::lane::BlockingLane::new_with_shutdown(
+                Services {
+                    core: core.core_store,
+                    hotkeys: service,
+                },
+                32,
+                |services| {
+                    services
+                        .hotkeys
+                        .shutdown()
+                        .map_err(|_| persistence::lane::LaneError::CleanupFailed)
+                },
+            )?);
+            let os = app.handle().clone();
+            let initial = lane
+                .submit(move |services| {
+                    if let Some(core) = services.core.as_ref() {
+                        let _ = services.hotkeys.initialize(core);
+                        if autostart::reconcile(core, &os).is_err() {
+                            record_diagnostic(
+                                &os,
+                                DiagnosticLevel::Error,
+                                "autostart_reconcile_failed",
+                                Some("AUTOSTART_RECONCILE_FAILED"),
+                            );
+                        }
+                    }
+                    qbit_hotkeys::ipc::status(&services.hotkeys)
+                })
+                .map_err(|_| "configuration lane closed")?
+                .recv()?;
+            let mut registry = FeatureRegistry::new();
+            registry.register_with_state(
+                qbit_hotkeys::descriptor(),
+                if cfg!(windows) {
+                    FeatureLifecycleState::Disabled
+                } else {
+                    FeatureLifecycleState::Unavailable
+                },
+            )?;
+            registry.set_lifecycle_state(
+                &feature_api::FeatureId::new(qbit_hotkeys::FEATURE_ID)?,
+                match initial.lifecycle_state {
+                    FeatureLifecycleStateDto::Running => FeatureLifecycleState::Running,
+                    FeatureLifecycleStateDto::Failed => FeatureLifecycleState::Failed,
+                    FeatureLifecycleStateDto::Unavailable => FeatureLifecycleState::Unavailable,
+                    _ => FeatureLifecycleState::Disabled,
+                },
+            )?;
+            app.manage(ConfigurationState { lane });
             app.manage(ApplicationState {
                 app_version: app.package_info().version.to_string(),
                 platform: std::env::consts::OS.to_owned(),
                 runtime_state: core.runtime_state,
                 schema_version: core.schema_version,
                 startup_error: core.startup_error,
-                registry: Mutex::new(FeatureRegistry::new()),
-                _core_store: Mutex::new(core.core_store),
-                exit_requested: AtomicBool::new(false),
+                registry: Mutex::new(registry),
+                shutdown: shutdown::Shutdown::default(),
             });
 
             let open_item =
                 MenuItemBuilder::with_id(OPEN_MENU_ID, "Open Qbit Toolbox").build(app)?;
             let quit_item = MenuItemBuilder::with_id(QUIT_MENU_ID, "Quit").build(app)?;
+            app.manage(ShutdownMenu(quit_item.clone()));
             let menu = MenuBuilder::new(app)
                 .items(&[&open_item, &quit_item])
                 .build()?;
@@ -353,22 +492,37 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             tray.build(app)?;
 
-            if recovery_required {
+            if recovery_required || std::env::args_os().any(|arg| arg == "--show-control") {
                 handle_activation(app.handle(), ActivationIntent::OpenControlWindow);
             }
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_core_status])
+        .invoke_handler(tauri::generate_handler![
+            get_core_status,
+            hotkeys_list_mappings,
+            hotkeys_create_mapping,
+            hotkeys_update_mapping,
+            hotkeys_delete_mapping,
+            hotkeys_set_mapping_enabled,
+            hotkeys_set_feature_enabled,
+            hotkeys_get_runtime_status,
+            hotkeys_analyze_candidate,
+            get_autostart,
+            set_autostart
+        ])
         .build(tauri::generate_context!())?;
 
     application.run(|app, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
             let exit_requested = app
                 .try_state::<ApplicationState>()
-                .is_some_and(|state| state.exit_requested.load(Ordering::Relaxed));
+                .is_some_and(|state| state.shutdown.phase() == shutdown::Phase::Complete);
             if !exit_requested {
                 api.prevent_exit();
+                if code.is_some() {
+                    quit_application(app);
+                }
             }
         }
     });
@@ -379,6 +533,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hotkeys_registration_projects_native_contract_and_default_disabled_state() {
+        let mut registry = FeatureRegistry::new();
+        registry.register(qbit_hotkeys::descriptor()).unwrap();
+        let summary = feature_summary_dto(&registry.summaries()[0]);
+        assert_eq!(summary.id, "qbit.hotkeys");
+        assert_eq!(summary.display_name_key, "features.hotkeys.name");
+        assert_eq!(summary.lifecycle_state, FeatureLifecycleStateDto::Disabled);
+        assert_eq!(summary.runtime_mode, RuntimeModeDto::EmbeddedBackground);
+        assert_eq!(summary.startup_policy, StartupPolicyDto::OnApplicationStart);
+        assert_eq!(summary.route.as_deref(), Some("/features/hotkeys"));
+    }
 
     #[test]
     fn future_schema_maps_to_a_safe_migration_error() {
